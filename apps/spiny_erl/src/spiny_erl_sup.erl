@@ -28,7 +28,24 @@ start_link() ->
 
 %% Child :: {Id,StartFunc,Restart,Shutdown,Type,Modules}
 init([]) ->
-    {ok, { {one_for_all, 0, 1}, []} }.
+    RestartStrategy = one_for_one,
+    MaxRestarts = 1000,
+    MaxSecondsBetweenRestarts = 3600,
+    SupFlags = {RestartStrategy, MaxRestarts, MaxSecondsBetweenRestarts},
+    Restart = permanent,
+    Shutdown = 2000,
+    Type = worker,
+    PublisherServer = {spiny_erl_publisher, {spiny_erl_publisher, start_link, []},
+              Restart, Shutdown, Type, [spiny_erl_publisher]},
+    SubscriberManager = {spiny_erl_sub_man, {spiny_erl_sub_man, start_link, []},
+              Restart, Shutdown, Type, [spiny_erl_sub_man]},
+    LocalSubscriberManager = {spiny_erl_local_sub_man, {spiny_erl_local_sub_man, start_link, []},
+              Restart, Shutdown, Type, [spiny_erl_local_sub_man]},
+    DeliverServer = {spiny_erl_deliver, {spiny_erl_deliver, start_link, []},
+              Restart, Shutdown, Type, [spiny_erl_deliver]},
+    VnodeServer = {spiny_erl_vnode, {spiny_erl_vnode, start_link, []},
+              Restart, Shutdown, Type, [spiny_erl_vnode]},
+    {ok, {SupFlags, [PublisherServer, SubscriberManager, LocalSubscriberManager, DeliverServer, VnodeServer]}}.
 
 %%====================================================================
 %% Internal functions
