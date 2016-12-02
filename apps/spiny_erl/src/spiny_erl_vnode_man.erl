@@ -1,17 +1,16 @@
 %%%-------------------------------------------------------------------
-%% @doc spiny_erl_publisher
+%% @doc spiny_erl_vnode_man
 %% @end
 %%%-------------------------------------------------------------------
 
--module(spiny_erl_publisher).
-
+-module(spiny_erl_vnode_man).
 
 -behaviour(gen_server).
 
 -include("spiny_erl.hrl").
 
 %% API
--export([start_link/0, start_link/1, call/1, call/2]).
+-export([start_link/0, start_link/1, call/1, call/2, call_vnode/1, call_vnode/2, lookup/1, join/1, start_vnode/0, get_pid/1]).
 
 
 %% gen_server callbacks
@@ -20,8 +19,8 @@
 
 -define(SERVER, ?MODULE).
 
-% TODO: Change successor to list of successors
--record(state, {key, predecessor=nil, finger_table=[], successor=node()}).
+-define(TBL, spiny_erl_vnode_man_tbl).
+
 
 %%%===================================================================
 %%% API
@@ -55,7 +54,7 @@ start_link(Args) ->
 %% @end
 %%--------------------------------------------------------------------
 call(Request) ->
-	io:format("Calling with message:~p~n", [Request]),
+	io:format("spiny_erl_vnode_man:Calling with message:~p~n", [Request]),
     gen_server:call(?SERVER, Request).
     
 %%--------------------------------------------------------------------
@@ -65,11 +64,64 @@ call(Request) ->
 %% @spec call(Request::term(), node()) -> Reply::term()
 %% @end
 %%--------------------------------------------------------------------
-call(Request, #vnode{id=Id, node=Node}) ->
-	io:format("Calling ~p with message:~p~n", [Node, Request]),
+call(Request, Node) ->
+	io:format("spiny_erl_vnode_man:Calling ~p with message:~p~n", [Node, Request]),
     net_kernel:connect_node(Node),
     gen_server:call({?SERVER, Node}, Request).
-    
+
+
+lookup(Key) ->
+    call_vnode({lookup, Key}).
+
+join(Node) ->
+    call_vnode({join, Node}).
+
+call_vnode(Request) ->
+    call_vnode(Request, #vnode{id=nil, node=node()}).
+
+call_vnode(Request, #vnode{id=Id, node=Node}) ->
+	io:format("spiny_erl_vnode_man:call_vnode(~p, #vnode{~p, ~p})~n", [Request, Id, Node]),
+    %net_kernel:connect_node(Node),
+    try Node=:=node() of
+        true ->
+            io:format("D1~n"),
+            {ok, Pid} = gen_server:call(?SERVER, {get_pid, Id}),
+            io:format("D2~n"),
+            spiny_erl_vnode:call(Pid, Request);
+        false ->
+            {ok, Pid} = gen_server:call({?SERVER, Node}, {get_pid, Id}),
+            spiny_erl_vnode:call(Pid, Request)
+    catch
+         exit:X ->
+            io:format("call_vnode error ~p~n", [X])
+    end;
+call_vnode(Request, Pid) when is_pid(Pid) ->
+    spiny_erl_vnode:call(Pid, Request).
+
+%call_vnode(Request, Pid) when is_pid(Pid) ->
+%	io:format("spiny_erl_vnode_man:call_vnode(~p, ~p)~n", [Request, Pid]),
+%    spiny_erl_vnode:call(Pid, Request).
+
+start_vnode() ->
+	io:format("spiny_erl_vnode_man:start_vnode~n", []),
+    Id = chord_lib:uuid(),
+    case gen_server:call(?SERVER, last_node) of
+        {ok, LastVnode} ->
+            start_vnode_private(Id, LastVnode);
+        {error, Reason} ->
+            start_vnode_private(Id, nil)
+    end.
+
+start_vnode_private(Id, VNode) ->
+    case spiny_erl_vnode_sup:start_vnode(Id, VNode) of
+        {ok, Pid} ->
+            gen_server:call(?SERVER, {start_vnode, Id, Pid});
+        {error, Reason} ->
+            {error, Reason}
+    end.
+
+get_pid(Id) ->
+    gen_server:call(?SERVER, {get_pid, Id}).
 
 %%%===================================================================
 %%% gen_server callbacks
@@ -77,17 +129,58 @@ call(Request, #vnode{id=Id, node=Node}) ->
 
 
 init(Args) ->
-	io:format("Starting publisher...~n"),
-    {ok, #state{}}.
+	io:format("Starting vnode man...~n"),
+    DefaultETSOpts = [public, named_table,
+                      {read_concurrency, true}],
+    ets:new(?TBL, [{keypos, 1}|DefaultETSOpts]),
+    {ok, {}}.
 
     
 % publish
-handle_call({publish, Topic, Msg}, _From, State) ->
-	Nodes = spiny_erl_sub_man:call({subscribers, Topic}),
-	lists:map(fun(Node) ->
-		spiny_erl_deliver:call({deliver, Topic, Msg}, Node)
-	end, Nodes),
-	Reply = {ok, Topic, erlang:length(Nodes)},
+handle_call(start_vnode, _From, {}) ->
+	handle_call(start_vnode, _From, {nil});
+
+handle_call({start_vnode, Id, Pid}, _From, State) ->
+    ets:insert(?TBL, {Id, Pid}),
+    {reply, {ok, Pid}, {Pid}};
+
+handle_call(last_node, _From, {}) ->
+	Reply = {error, not_found},
+    {reply, Reply, {}};
+
+handle_call(last_node, _From, {LastVnode}) ->
+	Reply = {ok, LastVnode},
+    {reply, Reply, {LastVnode}};
+
+handle_call({get_pid, nil}, _From, {LastVnode}) ->
+    {reply, {ok, LastVnode}, {LastVnode}};
+handle_call({get_pid, Id}, _From, State) ->
+    io:format("get_pid ~p~n", [Id]),
+    Reply = case ets:lookup(?TBL, Id) of
+    	[{Id, Pid}] ->
+    		{ok, Pid};
+    	[] ->
+    		{error, not_found}
+    end,
+    io:format("get_pid Reply~p~n", [Reply]),
+    {reply, Reply, State};
+
+
+handle_call({call, Request, nil}, _From, {LastVnode}) ->
+	Reply = spiny_erl_vnode:call(LastVnode, Request),
+    {reply, Reply, {LastVnode}};
+
+handle_call({call, Request, nil}, _From, State) ->
+	Reply = {error, not_found},
+    {reply, Reply, State};
+
+handle_call({call, Request, Id}, _From, State) ->
+    Reply = case ets:lookup(?TBL, Id) of
+    	[{Id, Pid}] ->
+    		spiny_erl_vnode:call(Pid, Request);
+    	[] ->
+    		{error, not_found}
+    end,
     {reply, Reply, State};
     
 % Unkown Call

@@ -27,6 +27,10 @@
 -define(stabilize_delay, 50000).
 -define(fix_keys_delay, 10000).
 
+-record(vnode, {
+    id,
+    node}).
+
 -ifdef(debug).
     -define(hash_len, 8).
 -else.

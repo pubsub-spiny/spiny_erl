@@ -7,6 +7,7 @@
 
 -behaviour(gen_server).
 
+-include("spiny_erl.hrl").
 
 %% API
 -export([start_link/0, start_link/1, call/1, call/2]).
@@ -68,7 +69,7 @@ call(Request) ->
 %% @spec call(Request::term(), node()) -> Reply::term()
 %% @end
 %%--------------------------------------------------------------------
-call(Request, Node) ->
+call(Request, #vnode{id=Id, node=Node}) ->
 	io:format("Calling ~p with message:~p~n", [Node, Request]),
     net_kernel:connect_node(Node),
     gen_server:call({?SERVER, Node}, Request).

@@ -10,7 +10,7 @@
 -include("spiny_erl.hrl").
 
 %% API
--export([hash/1, max_hash_value/0, max_hash_value/1]).
+-export([hash/1, max_hash_value/0, max_hash_value/1, uuid/0]).
 
 %%%===================================================================
 %%% API
@@ -65,3 +65,12 @@ max_hash_value(BitCount, Total, Pos) when Pos < BitCount ->
     
 max_hash_value(_, Total, _) ->
     Total.
+
+
+uuid() ->
+    <<Rand1:48, _:4, Rand2:12, _:2, Rand3:62>> = crypto:strong_rand_bytes(16),
+    binary_to_list(<<Rand1:48,
+      0:1, 1:1, 0:1, 0:1,  % version 4 bits
+      Rand2:12,
+      1:1, 0:1,            % RFC 4122 variant bits
+      Rand3:62>>).

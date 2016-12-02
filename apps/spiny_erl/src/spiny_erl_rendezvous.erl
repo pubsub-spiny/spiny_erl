@@ -19,12 +19,12 @@
 sn(Key) when is_binary(Key) ->
 	sn(binary_to_list(Key));
 sn(Key) when is_list(Key) ->
-	spiny_erl_vnode:lookup(chord_lib:hash(Key)).
+	spiny_erl_vnode_man:lookup(chord_lib:hash(Key)).
 
 
 en(Key) when is_binary(Key) ->
-	sn(binary_to_list(Key));
+	en(binary_to_list(Key));
 en(Key) when is_list(Key) ->
-	spiny_erl_vnode:lookup(chord_lib:hash(Key)).
+	spiny_erl_vnode_man:lookup(chord_lib:hash(Key)).
 
 

@@ -10,7 +10,7 @@
 -include("spiny_erl.hrl").
 
 %% API
--export([start_link/0, start_link/1, call/1, call/2, lookup/1, join/1]).
+-export([start_link/2, call/2]).
 
 
 %% gen_server callbacks
@@ -20,11 +20,14 @@
 -define(SERVER, ?MODULE).
 
 % TODO: Change successor to list of successors
+
+
 -record(state, {
+    id,
     key,
     predecessor=nil,
     finger_table=[],
-    successor=node()}).
+    successor=#vnode{}}).
 
 -define('MAX_KEY', chord_lib:max_hash_value()).
 
@@ -34,36 +37,19 @@
 
 
 
-%%--------------------------------------------------------------------
-%% @doc
-%% Starts the node as a standalone node
-%%
-%% @spec start_link() -> {ok, Pid} | ignore | {error, Error}
-%% @end
-%%--------------------------------------------------------------------
-start_link() -> start_link([]).
 
 %%--------------------------------------------------------------------
 %% @doc
 %% Starts the node and attempts to place itself in the correct
 %% location on the ring according to the known nodes.
 %%
-%% @spec start_link(KnownNodes) -> {ok, Pid} | ignore | {error, Error}
+%% @spec start_link(Id) -> {ok, Pid} | ignore | {error, Error}
 %% @end
 %%--------------------------------------------------------------------
-start_link(KnownHosts) ->
-    gen_server:start_link({local, ?SERVER}, ?MODULE, KnownHosts, []).
+start_link(Id, KnownVnode) ->
+    io:format("spiny_erl_vnode:start_link:~p~n", [Id]),
+    gen_server:start_link(?MODULE, {Id, KnownVnode}, []).
     
-%%--------------------------------------------------------------------
-%% @doc
-%% Shortcut for gen_server:call(gen_chord, Request)
-%%
-%% @spec call(Request::term()) -> Reply::term()
-%% @end
-%%--------------------------------------------------------------------
-call(Request) ->
-	io:format("Calling with message:~p~n", [Request]),
-    gen_server:call(?SERVER, Request).
     
 %%--------------------------------------------------------------------
 %% @doc
@@ -72,39 +58,55 @@ call(Request) ->
 %% @spec call(Request::term(), node()) -> Reply::term()
 %% @end
 %%--------------------------------------------------------------------
-call(Request, Node) ->
-	io:format("Calling ~p with message:~p~n", [Node, Request]),
-    net_kernel:connect_node(Node),
-    gen_server:call({?SERVER, Node}, Request).
+%% call to vnode
+call(Pid, Request) ->
+    io:format("spiny_erl_vnode:Calling ~p with message:~p~n", [Pid, Request]),
+    gen_server:call(Pid, Request).
+
+call_vnode(Request, VNode) ->
+	io:format("spiny_erl_vnode:Calling vnode ~p with message:~p~n", [VNode, Request]),
+    spiny_erl_vnode_man:call_vnode(Request, VNode).
     
 
-lookup(Key) ->
-    find_successor(Key).
-
-join(Node) ->
-    call({join, Node}).
 
 %%%===================================================================
 %%% gen_server callbacks
 %%%===================================================================
 
-init(KnownNodes) when is_atom(KnownNodes) ->
-    init([KnownNodes]);
-    
-init(KnownNodes) ->
-	io:format("Starting gen_chord...~n"),
-    Key = chord_lib:hash(node()),
+init({Id, nil}) ->
+    io:format("Starting vnode...~p~n", [Id]),
+    % generate virtual node id
+    Key = chord_lib:hash(Id),
     spawn_link(fun() -> periodic_stabilize() end),
     {ok, #state{
+        id=Id,
         key=Key,
-        successor=node()
+        successor=#vnode{id=Id, node=node()}
+    }};
+init({Id, KnownVnode}) ->
+    io:format("Starting vnode with seed node...~p, ~p~n", [Id, KnownVnode]),
+    % generate virtual node id
+    Key = chord_lib:hash(Id),
+    spawn_link(fun() -> periodic_stabilize() end),
+    {ok, Successor} = find_successor(Key, KnownVnode),
+    SelfVnode = #vnode{id=Id, node=node()},
+    notify_successor(Successor, SelfVnode),
+    {ok, #state{
+        id=Id,
+        key=Key,
+        successor=Successor
     }}.
 
-    
+self_vnode(State) ->
+    #vnode{id=State#state.id, node=node()}.
+
 handle_call({join, Node}, _From, #state{key= Key} = State) ->
-    {ok, Successor} = find_successor(Key, Node),
-    Reply = notify_successor(Successor),
+    {ok, Successor} = find_successor(Key, #vnode{id=nil, node=Node}),
+    Reply = notify_successor(Successor, self_vnode(State)),
     {reply, Reply, State#state{successor= Successor}};
+
+handle_call({lookup, Key}, _From, State) ->
+    handle_call({find_successor, Key}, _From, State);
 
 handle_call({find_successor, Key}, _From, State) ->
     io:format("Finding successor to ~p...~n", [Key]),
@@ -121,9 +123,13 @@ handle_call({find_successor, Key}, _From, State) ->
     {reply, Reply, State};
 
 handle_call({new_predecessor, NewPredecessor}, From, State) ->
-    NewPredecessorKey = chord_lib:hash(NewPredecessor),
+    NewPredecessorKey = chord_lib:hash(NewPredecessor#vnode.id),
     OldPredecessor = State#state.predecessor,
-    OldPredecessorKey = chord_lib:hash(OldPredecessor),
+    OldPredecessorId = case OldPredecessor of
+        nil -> nil;
+        OldPredecessorVnode -> OldPredecessorVnode#vnode.id
+    end,
+    OldPredecessorKey = chord_lib:hash(OldPredecessorId),
     SuccessorKey = State#state.key,
     IsPredecessor = (OldPredecessor =:= nil) orelse between(OldPredecessorKey, SuccessorKey, NewPredecessorKey, false),
     NewState = case IsPredecessor of
@@ -132,12 +138,13 @@ handle_call({new_predecessor, NewPredecessor}, From, State) ->
             State#state{predecessor=NewPredecessor};
         false -> State
     end,
-    SuccessorIsSelf = State#state.successor =:= node(),
+    Successor = State#state.successor,
+    SuccessorIsSelf = State#state.id =:= Successor#vnode.id,
     NewState2 = case SuccessorIsSelf of
         true -> 
             gen_server:reply(From, ok),
             %error_logger:info_msg("New successor: ~p~n", [NewPredecessor]),
-            notify_successor(NewPredecessor),
+            notify_successor(NewPredecessor, self_vnode(State)),
             NewState#state{successor=NewPredecessor};
         false -> NewState
     end,
@@ -188,14 +195,14 @@ handle_info(stabilize, State) ->
     PredecessorKey = chord_lib:hash(Predecessor),
     {ok, SuccessorPredecessor} = case Successor =:= node() of
         true -> {ok, node()};
-        _ -> call(predecessor, Successor)
+        _ -> call_vnode(predecessor, Successor)
     end,
     io:format("Got SuccessorPredecessor: ~p~n", [SuccessorPredecessor]),
     SuccessorPredecessorKey = chord_lib:hash(SuccessorPredecessor),
     NewState = case (SuccessorPredecessor /= node()) andalso between(PredecessorKey, SuccessorKey, SuccessorPredecessorKey, false) of
         true -> 
             io:format("New successor: ~p~n", SuccessorPredecessor),
-            notify_successor(SuccessorPredecessor),
+            notify_successor(SuccessorPredecessor, self_vnode(State)),
             State#state{successor=SuccessorPredecessor};
         false -> State
     end,
@@ -233,23 +240,27 @@ code_change(_OldVsn, State, _Extra) ->
 %%% Internal functions
 %%%===================================================================
 
-notify_successor(Successor) when is_atom(Successor) ->
+notify_successor(#vnode{id=Id, node=SuccessorNode}=Successor, SelfVnode) ->
     Node = node(),
-    case Successor of
+    case SuccessorNode of
         nil -> ok;
         Node -> ok;
-        _ -> call({new_predecessor, node()}, Successor)
+        _ -> call_vnode({new_predecessor, SelfVnode}, Successor)
     end.
 
 successor_is_successor(Key, State) ->
     PredecessorKey = State#state.key,
     Successor = State#state.successor,
-    SuccessorKey = chord_lib:hash(atom_to_list(Successor)),
-    IsSuccessor = Successor =:= node(),
+    SuccessorId = Successor#vnode.id,
+    SuccessorKey = chord_lib:hash(SuccessorId),
+    IsSuccessor = (SuccessorId =:= State#state.id) and (Successor#vnode.node =:= node()),
+    io:format("successor_is_successor1 ~p,~p~n", [SuccessorId, State#state.id]),
     IsBetween = between(PredecessorKey, SuccessorKey, Key, true),
+    io:format("successor_is_successor2 ~p,~p~n", [IsSuccessor, IsBetween]),
     IsSuccessor or IsBetween.
     
 between(PredecessorKey, SuccessorKey, Key, IsInclusive) ->
+    io:format("between ~p,~p,~p,~p~n", [PredecessorKey, SuccessorKey, Key, IsInclusive]),
     IsLastNode = SuccessorKey =< PredecessorKey,
     Attempt1 = case IsInclusive of
         true -> (PredecessorKey < Key) and (Key =< SuccessorKey);
@@ -262,16 +273,14 @@ between(PredecessorKey, SuccessorKey, Key, IsInclusive) ->
                                  ((Key >= 0) and (Key < SuccessorKey)))
     end,
     IsBetween = Attempt1 or Attempt2,
-    error_logger:info_msg("Checking if ~p is between ~p and ~p...~p~n", [Key, PredecessorKey, SuccessorKey, IsBetween]),
+    %error_logger:info_msg("Checking if ~p is between ~p and ~p...~p~n", [Key, PredecessorKey, SuccessorKey, IsBetween]),
     IsBetween.
-
-find_successor(Key) ->
-    find_successor(Key, node()).
     
-find_successor(Key, Node) ->
+find_successor(Key, VNode) ->
+    io:format("spiny_erl_vnode:find_successor(~p, ~p)~n", [Key, VNode]),
     IsInRange = Key >= 0 andalso Key =< ?MAX_KEY,
     case IsInRange of
-        true -> call({find_successor, Key}, Node);
+        true -> spiny_erl_vnode_man:call_vnode({find_successor, Key}, VNode);
         false -> {error, out_of_bounds}
     end.
 
