@@ -19,7 +19,7 @@
 start(_StartType, _StartArgs) ->
 	io:format("Hello~n"),
     %application:start(cowboy),
-	%spiny_protocol:start(),
+	spiny_protocol:start(),
     SupResult = spiny_erl_sup:start_link(),
     io:format("~p~n", [SupResult]),
     io:format("A~n", []),

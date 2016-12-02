@@ -84,9 +84,7 @@ call_vnode(Request, #vnode{id=Id, node=Node}) ->
     %net_kernel:connect_node(Node),
     try Node=:=node() of
         true ->
-            io:format("D1~n"),
             {ok, Pid} = gen_server:call(?SERVER, {get_pid, Id}),
-            io:format("D2~n"),
             spiny_erl_vnode:call(Pid, Request);
         false ->
             {ok, Pid} = gen_server:call({?SERVER, Node}, {get_pid, Id}),
