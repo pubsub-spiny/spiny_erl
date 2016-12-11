@@ -19,18 +19,13 @@
 start(_StartType, _StartArgs) ->
 	io:format("Hello~n"),
     %application:start(cowboy),
+    application:start(chord),
 	spiny_protocol:start(),
     SupResult = spiny_erl_sup:start_link(),
     io:format("~p~n", [SupResult]),
     io:format("A~n", []),
     wait_for_application(spiny_erl_sup),
     io:format("B~n", []),
-    wait_for_application(spiny_erl_vnode_sup),
-    io:format("C~n", []),
-    A = spiny_erl_vnode_man:start_vnode(),
-    B = spiny_erl_vnode_man:start_vnode(),
-    %C = spiny_erl_vnode_man:start_vnode(),
-    io:format("A,B= ~p~p~n", [A,B]),
     SupResult.
 
 %%--------------------------------------------------------------------
@@ -38,14 +33,10 @@ stop(_State) ->
     ok.
 
 join(Node) ->
-	spiny_erl_vnode_man:join(Node).
+	chord_vnode_man:join(Node).
 
 state() ->
-	spiny_erl_vnode_man:call_vnode(state).
-
-notify(Msg) ->
-	Nodes = spiny_erl_gossip:nodes(),
-	spiny_erl_notifier:call({notify, Msg}, Nodes).
+	chord_vnode_man:call_vnode(state).
 
 publish(Topic, Msg) ->
 	case spiny_erl_rendezvous:en(Topic) of

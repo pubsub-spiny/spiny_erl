@@ -26,27 +26,26 @@ cluster_test(_Config) ->
     ct:log("B=~p~n", [B]),
     wait_running(A),
     wait_running(B),
-    timer:sleep(7000),
+    timer:sleep(3000),
     %true = spiny_erl_app:is_running(Z),
     Node = node(),
-    ct:log("Join:~p~n", [rpc:call(B, spiny_erl_app, join, [A])]),
+    ok = rpc:call(B, spiny_erl_app, join, [A]),
     ct:log("A State:~p~n", [rpc:call(A, spiny_erl_app, state, [])]),
     ct:log("B State:~p~n", [rpc:call(B, spiny_erl_app, state, [])]),
     %ct:log("A stabilize:~p~n", [rpc:call(A, spiny_erl_vnode, call, [stabilize])]),
     %ct:log("B stabilize:~p~n", [rpc:call(B, spiny_erl_vnode, call, [stabilize])]),
-    timer:sleep(7000),
-    ct:log("A State:~p~n", [rpc:call(A, spiny_erl_app, state, [])]),
-    ct:log("B State:~p~n", [rpc:call(B, spiny_erl_app, state, [])]),
-    RPB = rpc:call(B, spiny_erl_app, publish, ["topic", <<"payload">>]),
+    timer:sleep(3000),
+    %ct:log("A State:~p~n", [rpc:call(A, spiny_erl_app, state, [])]),
+    %ct:log("B State:~p~n", [rpc:call(B, spiny_erl_app, state, [])]),
+    {ok, "topic", 0} = rpc:call(B, spiny_erl_app, publish, ["topic", <<"payload">>]),
     Pid1 = spawn(fun() ->
         receive
             {Topic, Msg} ->
                 ct:log("recieve:~p,~p~n", [Topic, Msg])
         end
     end),
-    RSB = rpc:call(B, spiny_erl_app, subscribe, ["topic", Pid1]),
-    RPA = rpc:call(A, spiny_erl_app, publish, ["topic", <<"payload">>]),
-    ct:log("Result:~p~n,~p~n,~p~n", [RPB, RSB, RPA]),
+    ok = rpc:call(B, spiny_erl_app, subscribe, ["topic", Pid1]),
+    {ok, "topic", 1} = rpc:call(A, spiny_erl_app, publish, ["topic", <<"payload">>]),
     ct_slave:stop(A).
 
 
