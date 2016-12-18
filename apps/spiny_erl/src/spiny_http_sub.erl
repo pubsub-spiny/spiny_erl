@@ -9,9 +9,14 @@
 init(_Type, Req, _Opts) ->
 	{Path, Req2} = cowboy_req:path(Req),
 	{Channel, Req3} = cowboy_req:qs_val(<<"c">>, Req2),
-	spiny_erl_app:subscribe(Channel, self()),
-	io:format("init~n"),
-    {loop, Req3, {Channel}, hibernate}.
+	case spiny_erl_app:subscribe(Channel, self()) of
+    ok ->
+      io:format("init~n"),
+      {loop, Req3, {Channel}, hibernate};
+    {error, Reason} ->
+      io:format("init ~p~n", [Reason]),
+      {shutdown, Req3, {Channel}}
+  end.
 
 handle(Info, Req, State) ->
 	io:format("handle~n"),

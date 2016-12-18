@@ -58,7 +58,7 @@ start_link(Args) ->
 %% @end
 %%--------------------------------------------------------------------
 call(Request) ->
-	io:format("Calling with message:~p~n", [Request]),
+	io:format("spiny_erl_local_sub_man:call(~p)~n", [Request]),
     gen_server:call(?SERVER, Request).
     
 %%--------------------------------------------------------------------

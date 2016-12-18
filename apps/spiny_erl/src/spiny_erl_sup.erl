@@ -43,9 +43,11 @@ init([]) ->
               Restart, Shutdown, Type, [spiny_erl_local_sub_man]},
     DeliverServer = {spiny_erl_deliver, {spiny_erl_deliver, start_link, []},
               Restart, Shutdown, Type, [spiny_erl_deliver]},
-    VnodeServer = {spiny_erl_vnode, {spiny_erl_vnode, start_link, []},
-              Restart, Shutdown, Type, [spiny_erl_vnode]},
-    {ok, {SupFlags, [PublisherServer, SubscriberManager, LocalSubscriberManager, DeliverServer, VnodeServer]}}.
+    %VnodeServer = {chord_sup, {spiny_erl_vnode_sup, start_link, []},
+    %          Restart, Shutdown, supervisor, [spiny_erl_vnode_sup]},
+    %VnodeManServer = {spiny_erl_vnode_man, {spiny_erl_vnode_man, start_link, []},
+    %          Restart, Shutdown, Type, [spiny_erl_vnode_man]},
+    {ok, {SupFlags, [PublisherServer, SubscriberManager, LocalSubscriberManager, DeliverServer]}}.
 
 %%====================================================================
 %% Internal functions

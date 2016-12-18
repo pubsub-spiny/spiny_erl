@@ -19,22 +19,24 @@
 start(_StartType, _StartArgs) ->
 	io:format("Hello~n"),
     %application:start(cowboy),
+    application:start(chord),
 	spiny_protocol:start(),
-    spiny_erl_sup:start_link().
+    SupResult = spiny_erl_sup:start_link(),
+    io:format("~p~n", [SupResult]),
+    io:format("A~n", []),
+    wait_for_application(spiny_erl_sup),
+    io:format("B~n", []),
+    SupResult.
 
 %%--------------------------------------------------------------------
 stop(_State) ->
     ok.
 
 join(Node) ->
-	spiny_erl_vnode:join(Node).
+	chord_vnode_man:join(Node).
 
 state() ->
-	spiny_erl_vnode:call(state).
-
-notify(Msg) ->
-	Nodes = spiny_erl_gossip:nodes(),
-	spiny_erl_notifier:call({notify, Msg}, Nodes).
+	chord_vnode_man:call_vnode(state).
 
 publish(Topic, Msg) ->
 	case spiny_erl_rendezvous:en(Topic) of
@@ -48,19 +50,32 @@ subscribe(Topic, Pid) ->
 	spiny_erl_local_sub_man:call({subscribe, Topic, Pid}),
 	case spiny_erl_rendezvous:sn(Topic) of
 		{ok, Node} ->
-			spiny_erl_sub_man:call({subscribe, Topic, node()}, Node);
-		_ ->
-			{error, node_not_found}
+			spiny_erl_sub_man:call({subscribe, Topic, node()}, Node),
+			ok;
+		{error, Reason} ->
+			{error, Reason}
 	end.
 
 unsubscribe(Topic, Pid) ->
 	spiny_erl_local_sub_man:call({unsubscribe, Topic, Pid}).
 	%0になったらremoteからもunsubscribeする
 
+wait_for_application(App) ->
+    case is_running(App) of
+        true ->
+            ok;
+        false ->
+            timer:sleep(500),
+            wait_for_application(App)
+    end.
+
 %% @doc Is running?
 is_running() ->
-	io:format("~p", [erlang:whereis(spiny_erl_sup)]),
-	case erlang:whereis(spiny_erl_sup) of
+	is_running(spiny_erl_sup).
+
+is_running(App) ->
+	io:format("~p~p~n", [node(), erlang:whereis(App)]),
+	case erlang:whereis(App) of
 		undefined ->
 			false;
 		P when is_pid(P) ->
